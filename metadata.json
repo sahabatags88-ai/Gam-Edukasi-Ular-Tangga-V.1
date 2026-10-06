@@ -1,0 +1,6 @@
+{
+  "name": "Algorithm Quest — Ular Tangga Algoritma",
+  "description": "Game edukasi web interaktif Ular Tangga Algoritma untuk siswa SMP Kelas IX Informatika Bab 6: Algoritma dan Pemrograman.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
