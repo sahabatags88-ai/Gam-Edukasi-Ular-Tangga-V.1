@@ -12,6 +12,7 @@ import {
   VolumeX,
   CheckCircle2,
   Percent,
+  Trophy,
 } from 'lucide-react';
 
 interface GameHUDProps {
@@ -29,6 +30,7 @@ interface GameHUDProps {
   playerLevel?: number;
   onToggleSound?: () => void;
   onOpenProfile?: () => void;
+  onOpenLeaderboard?: () => void;
   onRestart: () => void;
 }
 
@@ -47,6 +49,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   playerLevel,
   onToggleSound,
   onOpenProfile,
+  onOpenLeaderboard,
   onRestart,
 }) => {
   return (
@@ -187,17 +190,29 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
 
-        {/* Right: Profile, Sound Toggle & Quick Restart Button */}
+        {/* Right: Profile, Leaderboard, Sound Toggle & Quick Restart Button */}
         <div className="flex items-center gap-1.5">
           {onOpenProfile && (
             <button
               type="button"
               onClick={onOpenProfile}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-bold transition-all cursor-pointer shadow-sm shadow-cyan-500/10"
-              title="Buka Profil Pemain (Section 4)"
+              title="Buka Profil Pemain"
             >
               <User className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">PROFIL</span>
+            </button>
+          )}
+
+          {onOpenLeaderboard && (
+            <button
+              type="button"
+              onClick={onOpenLeaderboard}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all cursor-pointer shadow-sm shadow-amber-500/10"
+              title="Buka Leaderboard Online"
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">RANKING</span>
             </button>
           )}
 

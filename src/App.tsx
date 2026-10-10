@@ -46,6 +46,13 @@ import { LivesOverModal } from './components/LivesOverModal';
 import { FloatingScoreFeedback, FloatingFeedbackData } from './components/FloatingScoreFeedback';
 import { ProfileModal } from './components/ProfileModal';
 import { EventBanner, EventBannerData } from './components/EventBanner';
+import { LeaderboardModal } from './components/LeaderboardModal';
+import {
+  generateMatchId,
+  buildSubmissionPayload,
+  submitMatchResult,
+  ScoreSubmissionStatus,
+} from './services/scoreSubmissionService';
 
 const STORAGE_KEY = 'algorithmQuestGame';
 
@@ -100,7 +107,11 @@ export default function App() {
   // Player Profile State (PROMPT 07)
   const [profile, setProfile] = useState<PlayerProfile | null>(() => loadPlayerProfile());
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
-  const [syncedSessionId, setSyncedSessionId] = useState<string | null>(null);
+  const [isLeaderboardOpen, setIsLeaderboardOpen] = useState<boolean>(false);
+  const [currentMatchId, setCurrentMatchId] = useState<string>(() => generateMatchId());
+  const [submissionStatus, setSubmissionStatus] = useState<ScoreSubmissionStatus>('idle');
+  const [submissionMessage, setSubmissionMessage] = useState<string>('');
+  const [hasSubmittedMatch, setHasSubmittedMatch] = useState<boolean>(false);
 
   // Initialize & Restore from LocalStorage (Section 25)
   useEffect(() => {
@@ -231,6 +242,10 @@ export default function App() {
       clearedQuestionIds: [],
     });
     setLastQuestionId(null);
+    setCurrentMatchId(generateMatchId());
+    setSubmissionStatus('idle');
+    setSubmissionMessage('');
+    setHasSubmittedMatch(false);
     setGameStatus('Permainan dimulai! Target: Capai Kotak 100 & sapu bersih 15 soal!');
     setScreen('playing');
   };
@@ -243,6 +258,16 @@ export default function App() {
 
   const handleCloseProfile = () => {
     setIsProfileOpen(false);
+  };
+
+  // Leaderboard modal controls (PROMPT 03)
+  const handleOpenLeaderboard = () => {
+    audio.buttonClick();
+    setIsLeaderboardOpen(true);
+  };
+
+  const handleCloseLeaderboard = () => {
+    setIsLeaderboardOpen(false);
   };
 
   const handleResetProfile = () => {
@@ -286,6 +311,37 @@ export default function App() {
     }
   };
 
+  // Asynchronous Score Submission ke Leaderboard Online (PROMPT 04C)
+  const submitScoreToServer = async (matchIdToSubmit: string) => {
+    // Pastikan syarat validasi terpenuhi
+    if (mission.questionsCleared < MISSION_TOTAL_QUESTIONS) {
+      console.warn('[Leaderboard] Pengiriman dibatalkan: Soal tuntas belum mencapai syarat minimal 15.');
+      return;
+    }
+
+    setSubmissionStatus('submitting');
+    setSubmissionMessage('Menyimpan skor ke Leaderboard Online...');
+
+    try {
+      const payload = buildSubmissionPayload(
+        matchIdToSubmit,
+        playerName,
+        stats,
+        mission.questionsCleared,
+        mission.missionTotal
+      );
+
+      const result = await submitMatchResult(payload);
+      setSubmissionStatus(result.status);
+      setSubmissionMessage(result.message);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.warn('[Leaderboard] Exception submitScoreToServer:', errorMsg);
+      setSubmissionStatus('failed');
+      setSubmissionMessage('Gagal menghubungi server Leaderboard.');
+    }
+  };
+
   // Trigger Victory: sync game stats to profile, play victory audio, transition to finish screen
   const triggerVictory = () => {
     audio.victory();
@@ -293,7 +349,7 @@ export default function App() {
 
     // Sync to PlayerProfile in localStorage (PROMPT 07)
     if (playerName) {
-      let currentProf = profile || loadPlayerProfile() || createDefaultProfile(playerName);
+      const currentProf = profile || loadPlayerProfile() || createDefaultProfile(playerName);
       const updatedProfile = syncGameToProfile(
         currentProf,
         stats,
@@ -301,6 +357,13 @@ export default function App() {
         mission.missionTotal
       );
       setProfile(updatedProfile);
+    }
+
+    // Submit ke Leaderboard Online secara aman & non-blocking (PROMPT 04C)
+    // Cegah submit berulang dalam sesi kemenangan yang sama
+    if (!hasSubmittedMatch) {
+      setHasSubmittedMatch(true);
+      submitScoreToServer(currentMatchId);
     }
 
     setTimeout(() => {
@@ -696,6 +759,10 @@ export default function App() {
       clearedQuestionIds: [],
     });
     setLastQuestionId(null);
+    setCurrentMatchId(generateMatchId());
+    setSubmissionStatus('idle');
+    setSubmissionMessage('');
+    setHasSubmittedMatch(false);
     setGameStatus('Permainan baru dimulai! Lempar dadu.');
     setScreen('playing');
   };
@@ -709,6 +776,7 @@ export default function App() {
         <StartScreen
           onStart={handleStartGame}
           onOpenProfile={handleOpenProfile}
+          onOpenLeaderboard={handleOpenLeaderboard}
           playerName={playerName}
           playerLevel={profile?.level ?? 1}
         />
@@ -740,6 +808,7 @@ export default function App() {
             soundEnabled={soundEnabled}
             playerLevel={profile?.level ?? 1}
             onOpenProfile={handleOpenProfile}
+            onOpenLeaderboard={handleOpenLeaderboard}
             onToggleSound={handleToggleSound}
             onRestart={handleRestart}
           />
@@ -811,6 +880,10 @@ export default function App() {
           xp={stats.score}
           puzzlesSolved={mission.questionsCleared}
           missionTotal={mission.missionTotal}
+          submissionStatus={submissionStatus}
+          submissionMessage={submissionMessage}
+          onRetrySubmission={() => submitScoreToServer(currentMatchId)}
+          onOpenLeaderboard={handleOpenLeaderboard}
           onPlayAgain={handleRestart}
         />
       )}
@@ -841,7 +914,16 @@ export default function App() {
         />
       )}
 
-      {/* 8. Reusable Dynamic Event Banner (PROMPT 08) */}
+      {/* 8. Leaderboard Modal (PROMPT 03) */}
+      {isLeaderboardOpen && (
+        <LeaderboardModal
+          isOpen={isLeaderboardOpen}
+          onClose={handleCloseLeaderboard}
+          currentPlayerName={playerName}
+        />
+      )}
+
+      {/* 9. Reusable Dynamic Event Banner (PROMPT 08) */}
       <EventBanner
         banner={eventBanner}
         onDismiss={() => setEventBanner(null)}

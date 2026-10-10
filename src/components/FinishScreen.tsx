@@ -10,8 +10,13 @@ import {
   XCircle,
   Flame,
   Percent,
+  CloudCheck,
+  CloudOff,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { audio } from '../utils/audio';
+import { ScoreSubmissionStatus } from '../services/scoreSubmissionService';
 
 interface FinishScreenProps {
   playerName: string;
@@ -19,6 +24,10 @@ interface FinishScreenProps {
   stats?: GameStats;
   puzzlesSolved?: number;
   missionTotal?: number;
+  submissionStatus?: ScoreSubmissionStatus;
+  submissionMessage?: string;
+  onRetrySubmission?: () => void;
+  onOpenLeaderboard?: () => void;
   onPlayAgain: () => void;
 }
 
@@ -28,6 +37,10 @@ export const FinishScreen: React.FC<FinishScreenProps> = ({
   stats,
   puzzlesSolved = 15,
   missionTotal = 15,
+  submissionStatus = 'idle',
+  submissionMessage = '',
+  onRetrySubmission,
+  onOpenLeaderboard,
   onPlayAgain,
 }) => {
   const finalXp = stats ? stats.score : xp;
@@ -150,18 +163,89 @@ export const FinishScreen: React.FC<FinishScreenProps> = ({
           </div>
         </div>
 
-        {/* Action Button: MAIN LAGI */}
-        <button
-          type="button"
-          onClick={() => {
-            audio.buttonClick();
-            onPlayAgain();
-          }}
-          className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-extrabold text-base shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:scale-102 active:scale-98 transition-all cursor-pointer"
-        >
-          <RotateCcw className="w-4 h-4" />
-          <span>MAIN LAGI</span>
-        </button>
+        {/* Status Sinkronisasi Leaderboard Online */}
+        <div className="w-full mb-6">
+          {submissionStatus === 'submitting' && (
+            <div className="flex items-center justify-center gap-2.5 p-3 rounded-2xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs sm:text-sm font-semibold animate-pulse">
+              <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+              <span>Menyinkronkan skor ke Leaderboard Online...</span>
+            </div>
+          )}
+
+          {(submissionStatus === 'synced' || submissionStatus === 'duplicate_ignored') && (
+            <div className="flex items-center justify-center gap-2.5 p-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 text-xs sm:text-sm font-semibold">
+              <CloudCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                {submissionStatus === 'duplicate_ignored'
+                  ? '✓ Skor pertandingan ini sudah tercatat di Leaderboard Online'
+                  : '✓ Skor berhasil tersimpan di Leaderboard Online!'}
+              </span>
+            </div>
+          )}
+
+          {submissionStatus === 'offline_unconfigured' && (
+            <div className="flex items-center justify-center gap-2.5 p-3 rounded-2xl bg-slate-900 border border-slate-700/60 text-slate-400 text-xs sm:text-sm font-medium">
+              <CloudOff className="w-4 h-4 text-slate-400 shrink-0" />
+              <span>Tersimpan di Profil Lokal (Mode Offline).</span>
+            </div>
+          )}
+
+          {submissionStatus === 'failed' && (
+            <div className="flex flex-col gap-2 p-3 rounded-2xl bg-rose-950/40 border border-rose-500/30 text-xs sm:text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-rose-300 font-semibold">
+                  <CloudOff className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{submissionMessage || 'Gagal tersambung ke leaderboard online'}</span>
+                </div>
+                {onRetrySubmission && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audio.buttonClick();
+                      onRetrySubmission();
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white font-bold border border-rose-500/40 transition-colors cursor-pointer text-xs"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Coba Lagi</span>
+                  </button>
+                )}
+              </div>
+              <span className="text-[11px] text-slate-400 text-left">
+                Skor tetap aman tersimpan di profil perangkat kamu.
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Action Buttons: MAIN LAGI & LEADERBOARD */}
+        <div className="flex flex-col gap-2.5 w-full">
+          {onOpenLeaderboard && (
+            <button
+              type="button"
+              onClick={() => {
+                audio.buttonClick();
+                onOpenLeaderboard();
+              }}
+              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-amber-500/40 hover:border-amber-500 text-amber-300 font-bold text-sm shadow-md shadow-amber-950/30 hover:scale-102 active:scale-98 transition-all cursor-pointer"
+            >
+              <Trophy className="w-4 h-4 text-amber-400" />
+              <span>LIHAT POSISI DI LEADERBOARD ONLINE</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              audio.buttonClick();
+              onPlayAgain();
+            }}
+            className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-extrabold text-base shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:scale-102 active:scale-98 transition-all cursor-pointer"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>MAIN LAGI</span>
+          </button>
+        </div>
       </div>
 
       {/* Footer Info */}

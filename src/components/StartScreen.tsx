@@ -1,9 +1,10 @@
 import React from 'react';
-import { Play, Sparkles, Terminal, User } from 'lucide-react';
+import { Play, Sparkles, Terminal, User, Trophy } from 'lucide-react';
 
 interface StartScreenProps {
   onStart: () => void;
   onOpenProfile?: () => void;
+  onOpenLeaderboard?: () => void;
   playerName?: string;
   playerLevel?: number;
 }
@@ -11,6 +12,7 @@ interface StartScreenProps {
 export const StartScreen: React.FC<StartScreenProps> = ({
   onStart,
   onOpenProfile,
+  onOpenLeaderboard,
   playerName,
   playerLevel = 1,
 }) => {
@@ -37,7 +39,19 @@ export const StartScreen: React.FC<StartScreenProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {onOpenLeaderboard && (
+            <button
+              type="button"
+              onClick={onOpenLeaderboard}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-xs text-amber-300 font-bold transition-all cursor-pointer shadow-sm shadow-amber-500/10"
+              title="Buka Leaderboard Online"
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              <span>LEADERBOARD</span>
+            </button>
+          )}
+
           {playerName && onOpenProfile && (
             <button
               type="button"
@@ -107,16 +121,29 @@ export const StartScreen: React.FC<StartScreenProps> = ({
           </div>
         </div>
 
-        {/* Start Button */}
-        <button
-          onClick={onStart}
-          className="group relative inline-flex items-center gap-3 px-8 sm:px-10 py-4 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-extrabold text-lg sm:text-xl shadow-xl shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer"
-        >
-          <div className="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center group-hover:rotate-12 transition-transform">
-            <Play className="w-4 h-4 fill-white" />
-          </div>
-          <span>MULAI BERMAIN</span>
-        </button>
+        {/* Start Button & Leaderboard Button */}
+        <div className="flex flex-col items-center gap-3 w-full">
+          <button
+            onClick={onStart}
+            className="group relative inline-flex items-center justify-center gap-3 px-8 sm:px-10 py-4 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-extrabold text-lg sm:text-xl shadow-xl shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer w-full sm:w-auto"
+          >
+            <div className="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center group-hover:rotate-12 transition-transform">
+              <Play className="w-4 h-4 fill-white" />
+            </div>
+            <span>MULAI BERMAIN</span>
+          </button>
+
+          {onOpenLeaderboard && (
+            <button
+              type="button"
+              onClick={onOpenLeaderboard}
+              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-amber-500/30 hover:border-amber-500/60 text-amber-300 font-bold text-sm shadow-md shadow-amber-950/40 hover:scale-102 transition-all cursor-pointer"
+            >
+              <Trophy className="w-4 h-4 text-amber-400" />
+              <span>LIHAT LEADERBOARD ONLINE</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Footer Info & Creator Credit */}
