@@ -62,6 +62,33 @@ function isValidMatchId(id: string): boolean {
   return matchIdRegex.test(trimmed);
 }
 
+// Helper: Normalisasi match_id ke UUID v4 valid agar kompatibel dengan PostgreSQL
+// kolom bertipe UUID maupun VARCHAR tanpa pernah memicu error 22P02
+async function normalizeToUuid(input: string): Promise<string> {
+  const trimmed = input.trim();
+  if (isValidUuid(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+
+  // Jika input bukan UUID (misal format legacy 'aq-timestamp-random'),
+  // buat UUID deterministik v4-compliant dari SHA-256 hash input
+  // agar idempotensi tetap terjaga (input yang sama menghasilkan UUID yang sama).
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`aq-match-id-v1-${trimmed}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  // Format sebagai UUID v4: 8-4-4-4-12
+  const p1 = hex.substring(0, 8);
+  const p2 = hex.substring(8, 12);
+  const p3 = '4' + hex.substring(13, 16);
+  const p4 = ((parseInt(hex.substring(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, '0') + hex.substring(18, 20);
+  const p5 = hex.substring(20, 32);
+
+  return `${p1}-${p2}-${p3}-${p4}-${p5}`.toLowerCase();
+}
+
 Deno.serve(async (req: Request) => {
   // 1. Tangani CORS Preflight (OPTIONS request)
   if (req.method === 'OPTIONS') {
@@ -216,12 +243,16 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // 6. Cek Idempotency / Cegah Duplikasi Pengiriman Pertandingan yang Sama
+  // 6. Normalisasi match_id ke format UUID valid
+  // Menjamin kecocokan 100% baik pada kolom PostgreSQL bertipe UUID maupun VARCHAR/TEXT (Bebas Error 22P02)
+  const safeMatchId = await normalizeToUuid(matchId);
+
+  // 7. Cek Idempotency / Cegah Duplikasi Pengiriman Pertandingan yang Sama
   try {
     const { data: existingMatch, error: checkError } = await supabaseAdmin
       .from('match_results')
       .select('id, match_id, created_at')
-      .eq('match_id', matchId)
+      .eq('match_id', safeMatchId)
       .maybeSingle();
 
     if (checkError) {
@@ -235,7 +266,7 @@ Deno.serve(async (req: Request) => {
           success: false,
           error: isUuidMismatch ? 'DATABASE_SCHEMA_TYPE_MISMATCH' : 'DATABASE_QUERY_ERROR',
           message: isUuidMismatch
-            ? 'Kolom match_id pada tabel database match_results masih bertipe UUID (Error 22P02). Format game adalah teks (aq-...). Jalankan migrasi SQL 002_alter_match_id_to_text.sql di Supabase SQL Editor.'
+            ? 'Kolom match_id pada tabel database match_results masih bertipe UUID (Error 22P02). Jalankan migrasi SQL 002_alter_match_id_to_text.sql di Supabase SQL Editor.'
             : 'Gagal memverifikasi catatan pertandingan pada database.',
           details: checkError.message,
           code: checkError.code,
@@ -260,9 +291,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 7. Simpan Hasil Pertandingan ke public.match_results
+    // 8. Simpan Hasil Pertandingan ke public.match_results
     const insertPayload = {
-      match_id: matchId,
+      match_id: safeMatchId,
       player_id: playerId,
       player_name: rawPlayerName,
       score,
@@ -298,13 +329,29 @@ Deno.serve(async (req: Request) => {
         insertError.code === '22P02' ||
         insertError.message?.toLowerCase().includes('uuid');
 
+      const isConstraintCheckViolation =
+        insertError.code === '23514' ||
+        insertError.message?.toLowerCase().includes('check constraint') ||
+        insertError.message?.toLowerCase().includes('chk_match');
+
+      let customErrorMessage = 'Gagal menyimpan skor pertandingan ke leaderboard.';
+      let customErrorKey = 'INSERT_FAILED';
+
+      if (isConstraintCheckViolation) {
+        customErrorKey = 'DATABASE_CONSTRAINT_VIOLATION';
+        customErrorMessage =
+          'Constraint database menolak data pertandingan (Error 23514). Jalankan migrasi SQL 003_fix_constraint_total_questions.sql di Supabase SQL Editor.';
+      } else if (isUuidMismatch) {
+        customErrorKey = 'DATABASE_SCHEMA_TYPE_MISMATCH';
+        customErrorMessage =
+          'Kolom match_id pada tabel database match_results masih bertipe UUID (Error 22P02). Jalankan migrasi SQL 002_alter_match_id_to_text.sql di Supabase SQL Editor.';
+      }
+
       return jsonResponse(
         {
           success: false,
-          error: isUuidMismatch ? 'DATABASE_SCHEMA_TYPE_MISMATCH' : 'INSERT_FAILED',
-          message: isUuidMismatch
-            ? 'Kolom match_id pada tabel database match_results masih bertipe UUID (Error 22P02). Jalankan migrasi SQL 002_alter_match_id_to_text.sql di Supabase SQL Editor.'
-            : 'Gagal menyimpan skor pertandingan ke leaderboard.',
+          error: customErrorKey,
+          message: customErrorMessage,
           details: insertError.message,
           code: insertError.code,
         },

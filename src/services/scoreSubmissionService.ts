@@ -33,14 +33,31 @@ export interface ScoreSubmissionResult {
 }
 
 /**
- * Menghasilkan match_id unik yang terikat pada sesi pertandingan saat ini.
- * Format standar: `aq-<timestamp>-<random-hex>`
- * Jika matchId sudah ada, kembalikan yang sama agar bersifat idempoten saat retry.
+ * Validasi apakah sebuah string memiliki format UUID v4 standar
+ */
+export const isValidUuid = (id: string | null | undefined): boolean => {
+  if (!id || typeof id !== 'string') return false;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id.trim());
+};
+
+/**
+ * Menghasilkan match_id unik berbasis UUID v4 standar.
+ * Format standar ini kompatibel 100% secara langsung dengan:
+ * 1. PostgreSQL kolom bertipe UUID (mencegah error 22P02)
+ * 2. PostgreSQL kolom bertipe VARCHAR/TEXT
+ * Serta menjamin idempotensi saat tombol 'Coba Lagi' ditekan.
  */
 export const generateMatchId = (): string => {
-  const timestamp = Date.now().toString(36);
-  const randomPart = Math.random().toString(36).substring(2, 8);
-  return `aq-${timestamp}-${randomPart}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback UUID v4 standar RFC4122 jika crypto.randomUUID belum tersedia di runtime
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 };
 
 /**
@@ -54,12 +71,14 @@ export const buildSubmissionPayload = (
   missionTotal: number = 15,
   playerId?: string | null
 ): ScoreSubmissionPayload => {
+  // Pastikan match_id berformat UUID valid; buat baru jika masih format legacy non-UUID
+  const safeMatchId = isValidUuid(matchId) ? matchId.trim() : generateMatchId();
   const totalQuestions = stats.totalQuestionsAnswered > 0 ? stats.totalQuestionsAnswered : puzzlesSolved;
   const accuracyNum = totalQuestions > 0 ? Math.round((stats.correctAnswers / totalQuestions) * 100) : 100;
   const gradeInfo = getPerformanceGrade(stats.score, accuracyNum, stats.maxCombo);
 
   return {
-    match_id: matchId,
+    match_id: safeMatchId,
     player_id: playerId || null,
     player_name: (playerName || 'Siswa').trim().slice(0, 30),
     score: Math.max(0, Math.min(25000, Math.round(stats.score))),
@@ -243,6 +262,13 @@ export const submitMatchResult = async (
       // 5. Penanganan HTTP 5xx Server Error
       if (statusCode >= 500) {
         console.warn(`[scoreSubmissionService] HTTP ${statusCode}: Kesalahan server cloud:`, responseBody);
+        const isConstraintViolation =
+          responseBody?.error === 'DATABASE_CONSTRAINT_VIOLATION' ||
+          String(responseBody?.message || '').includes('23514') ||
+          String(responseBody?.details || '').includes('23514') ||
+          String(responseBody?.details || '').includes('chk_match_total_questions_fixed') ||
+          String(error.message || '').includes('23514');
+
         const isSchemaMismatch =
           responseBody?.error === 'DATABASE_SCHEMA_TYPE_MISMATCH' ||
           String(responseBody?.message || '').includes('22P02') ||
@@ -250,15 +276,28 @@ export const submitMatchResult = async (
           String(responseBody?.details || '').toLowerCase().includes('uuid') ||
           String(error.message || '').includes('22P02');
 
+        let displayMessage =
+          responseBody?.message ||
+          `Server leaderboard sedang mengalami gangguan (HTTP ${statusCode}). Skor tersimpan aman di profil lokal.`;
+
+        let displayErrorKey: string = `HTTP_${statusCode}_SERVER_ERROR`;
+
+        if (isConstraintViolation) {
+          displayErrorKey = 'DATABASE_CONSTRAINT_VIOLATION';
+          displayMessage =
+            'Database menolak total_questions > 15 (Error 23514). Jalankan migrasi SQL 003 di Supabase SQL Editor.';
+        } else if (isSchemaMismatch) {
+          displayErrorKey = 'DATABASE_SCHEMA_TYPE_MISMATCH';
+          displayMessage =
+            'Kolom database match_id masih bertipe UUID (22P02). Perlu migrasi SQL 002 di Supabase SQL Editor.';
+        }
+
         return {
           status: 'failed',
           success: false,
           matchId: payload.match_id,
-          message: isSchemaMismatch
-            ? 'Kolom database match_id masih bertipe UUID (22P02). Perlu migrasi SQL 002 di Supabase SQL Editor.'
-            : responseBody?.message ||
-              `Server leaderboard sedang mengalami gangguan (HTTP ${statusCode}). Skor tersimpan aman di profil lokal.`,
-          error: isSchemaMismatch ? 'DATABASE_SCHEMA_TYPE_MISMATCH' : `HTTP_${statusCode}_SERVER_ERROR`,
+          message: displayMessage,
+          error: displayErrorKey,
           details: responseBody || error,
         };
       }

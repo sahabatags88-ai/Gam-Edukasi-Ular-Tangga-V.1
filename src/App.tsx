@@ -49,6 +49,7 @@ import { EventBanner, EventBannerData } from './components/EventBanner';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import {
   generateMatchId,
+  isValidUuid,
   buildSubmissionPayload,
   submitMatchResult,
   ScoreSubmissionStatus,
@@ -323,8 +324,15 @@ export default function App() {
     setSubmissionMessage('Menyimpan skor ke Leaderboard Online...');
 
     try {
+      // Pastikan matchId berformat UUID v4 valid (mencegah error database PostgreSQL 22P02)
+      let safeMatchId = matchIdToSubmit;
+      if (!isValidUuid(safeMatchId)) {
+        safeMatchId = generateMatchId();
+        setCurrentMatchId(safeMatchId);
+      }
+
       const payload = buildSubmissionPayload(
-        matchIdToSubmit,
+        safeMatchId,
         playerName,
         stats,
         mission.questionsCleared,
