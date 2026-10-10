@@ -21,22 +21,32 @@ const supabaseKey = (
   ''
 ).trim();
 
+export type SupabaseConfigDetail =
+  | 'not_configured'
+  | 'missing_url'
+  | 'missing_key'
+  | 'invalid_url_format'
+  | 'configured';
+
 export interface SupabaseConfigStatus {
   isConfigured: boolean;
   hasUrl: boolean;
   hasKey: boolean;
   urlHost?: string;
+  detail: SupabaseConfigDetail;
+  message: string;
 }
 
 /**
- * Memeriksa apakah konfigurasi Supabase tersedia di environment
+ * Memeriksa apakah konfigurasi Supabase tersedia di environment dan valid secara format
  */
 export const getSupabaseConfigStatus = (): SupabaseConfigStatus => {
-  const hasUrl = Boolean(supabaseUrl && supabaseUrl.startsWith('https://'));
+  const hasUrlRaw = Boolean(supabaseUrl && supabaseUrl.length > 0);
+  const isHttpsUrl = Boolean(supabaseUrl && (supabaseUrl.startsWith('https://') || supabaseUrl.startsWith('http://localhost')));
   const hasKey = Boolean(supabaseKey && supabaseKey.length > 10);
   let urlHost: string | undefined;
 
-  if (hasUrl) {
+  if (isHttpsUrl) {
     try {
       urlHost = new URL(supabaseUrl).host;
     } catch {
@@ -44,11 +54,54 @@ export const getSupabaseConfigStatus = (): SupabaseConfigStatus => {
     }
   }
 
+  if (!hasUrlRaw && !hasKey) {
+    return {
+      isConfigured: false,
+      hasUrl: false,
+      hasKey: false,
+      detail: 'not_configured',
+      message: 'Variabel lingkungan Supabase (VITE_SUPABASE_URL & VITE_SUPABASE_PUBLISHABLE_KEY) belum terpasang.',
+    };
+  }
+
+  if (!hasUrlRaw) {
+    return {
+      isConfigured: false,
+      hasUrl: false,
+      hasKey: true,
+      detail: 'missing_url',
+      message: 'VITE_SUPABASE_URL belum terpasang di environment.',
+    };
+  }
+
+  if (!isHttpsUrl) {
+    return {
+      isConfigured: false,
+      hasUrl: true,
+      hasKey,
+      detail: 'invalid_url_format',
+      message: 'Format VITE_SUPABASE_URL tidak valid (harus dimulai dengan https://).',
+    };
+  }
+
+  if (!hasKey) {
+    return {
+      isConfigured: false,
+      hasUrl: true,
+      hasKey: false,
+      urlHost,
+      detail: 'missing_key',
+      message: 'VITE_SUPABASE_PUBLISHABLE_KEY belum terpasang atau terlalu pendek.',
+    };
+  }
+
   return {
-    isConfigured: hasUrl && hasKey,
-    hasUrl,
-    hasKey,
+    isConfigured: true,
+    hasUrl: true,
+    hasKey: true,
     urlHost,
+    detail: 'configured',
+    message: 'Konfigurasi environment Supabase tersedia.',
   };
 };
 

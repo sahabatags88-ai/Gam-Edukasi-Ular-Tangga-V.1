@@ -109,28 +109,60 @@ export const submitMatchResult = async (
     });
 
     if (error) {
-      // Periksa apakah error karena duplikasi (409 Conflict)
-      // Supabase FunctionsClient mengembalikan error jika status non-2xx
-      const errorMsg = error.message || 'Gagal menghubungi server Edge Function';
-      
-      // Jika respons mengindikasikan duplikasi
-      if (errorMsg.includes('409') || errorMsg.includes('MATCH_ALREADY_RECORDED')) {
+      // Periksa status code dan response body dari FunctionsHttpError
+      let statusCode = 0;
+      let responseBody: any = null;
+
+      if (error && 'context' in (error as any) && (error as any).context) {
+        try {
+          const ctx = (error as any).context;
+          statusCode = typeof ctx.status === 'number' ? ctx.status : 0;
+          if (typeof ctx.json === 'function') {
+            responseBody = await ctx.json();
+          }
+        } catch (_ctxErr) {
+          // Response body might be empty or already consumed
+        }
+      }
+
+      // 1. Tangani 409 Conflict / Duplikasi Pertandingan
+      const isDuplicate =
+        statusCode === 409 ||
+        responseBody?.error === 'MATCH_ALREADY_RECORDED' ||
+        error.message?.includes('409') ||
+        error.message?.includes('MATCH_ALREADY_RECORDED');
+
+      if (isDuplicate) {
         return {
           status: 'duplicate_ignored',
           success: true, // Idempotent sukses, skor sudah ada di leaderboard
           matchId: payload.match_id,
           message: 'Skor pertandingan ini telah tercatat di leaderboard.',
-          details: error,
+          details: responseBody || error,
         };
       }
 
+      // 2. Tangani 404 Not Found (Fungsi belum di-deploy ke Supabase)
+      if (statusCode === 404 || responseBody?.code === 'NOT_FOUND') {
+        return {
+          status: 'failed',
+          success: false,
+          matchId: payload.match_id,
+          message: 'Layanan skor online belum aktif di cloud (HTTP 404). Skor tersimpan aman secara lokal.',
+          error: 'EDGE_FUNCTION_NOT_DEPLOYED',
+          details: responseBody || error,
+        };
+      }
+
+      // 3. Tangani error lainnya dari backend
+      const fallbackMsg = responseBody?.message || error.message || 'Gagal menghubungi server Edge Function';
       return {
         status: 'failed',
         success: false,
         matchId: payload.match_id,
-        message: 'Gagal mengirim skor ke leaderboard online.',
-        error: errorMsg,
-        details: error,
+        message: fallbackMsg,
+        error: responseBody?.error || error.message,
+        details: responseBody || error,
       };
     }
 

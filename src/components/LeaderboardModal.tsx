@@ -16,6 +16,7 @@ import {
   fetchLeaderboard,
   LeaderboardEntry,
   LeaderboardResult,
+  LeaderboardConnectionState,
 } from '../services/leaderboardService';
 import { getSupabaseConfigStatus } from '../lib/supabase';
 import { audio } from '../utils/audio';
@@ -35,7 +36,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [mode, setMode] = useState<'online' | 'offline_unconfigured'>('online');
+  const [connectionState, setConnectionState] = useState<LeaderboardConnectionState>('connected');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const loadData = useCallback(async (limit: 10 | 50) => {
@@ -44,7 +45,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
     try {
       const result: LeaderboardResult = await fetchLeaderboard(limit);
-      setMode(result.mode);
+      setConnectionState(result.connectionState);
 
       if (result.success) {
         setEntries(result.entries);
@@ -54,6 +55,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Terjadi gangguan jaringan.';
+      setConnectionState('connection_error');
       setErrorMessage(msg);
     } finally {
       setIsLoading(false);
@@ -266,12 +268,25 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 text-slate-400 text-[11px]">
-            {mode === 'offline_unconfigured' ? (
+            {connectionState === 'unconfigured' && (
               <span className="flex items-center gap-1 text-amber-400/90 font-medium bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
                 <WifiOff className="w-3 h-3" />
                 Mode Lokal (Supabase belum terhubung)
               </span>
-            ) : (
+            )}
+            {connectionState === 'connection_error' && (
+              <span className="flex items-center gap-1 text-rose-400 font-medium bg-rose-500/10 px-2 py-0.5 rounded-md border border-rose-500/20">
+                <AlertCircle className="w-3 h-3" />
+                Gangguan Jaringan / Server
+              </span>
+            )}
+            {connectionState === 'permission_error' && (
+              <span className="flex items-center gap-1 text-orange-400 font-medium bg-orange-500/10 px-2 py-0.5 rounded-md border border-orange-500/20">
+                <AlertCircle className="w-3 h-3" />
+                Izin Akses Dibatasi (RLS)
+              </span>
+            )}
+            {connectionState === 'connected' && (
               <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 Database Online Terkoneksi
@@ -294,7 +309,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
               <div>
                 <p className="font-bold">Konfigurasi Database Belum Aktif di Lingkungan Ini</p>
                 <p className="text-amber-300/80 mt-0.5">
-                  Variabel environment Supabase (<code className="font-mono">VITE_SUPABASE_URL</code>) belum tersedia. Permainan tetap berjalan lancar dalam mode lokal, dan leaderboard online akan aktif otomatis setelah kunci dipasang.
+                  {configStatus.message} Pastikan variabel <code className="font-mono font-bold">VITE_SUPABASE_URL</code> dan <code className="font-mono font-bold">VITE_SUPABASE_PUBLISHABLE_KEY</code> telah disetel pada panel environment platform deployment Anda sebelum build.
                 </p>
               </div>
             </div>

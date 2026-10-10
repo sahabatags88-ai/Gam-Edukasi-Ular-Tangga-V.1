@@ -16,11 +16,19 @@ export interface LeaderboardEntry {
   rank?: number;
 }
 
+export type LeaderboardConnectionState =
+  | 'connected'
+  | 'unconfigured'
+  | 'connection_error'
+  | 'permission_error';
+
 export interface LeaderboardResult {
   success: boolean;
   entries: LeaderboardEntry[];
   totalCount: number;
   errorMessage?: string;
+  connectionState: LeaderboardConnectionState;
+  // Backward compatibility alias:
   mode: 'online' | 'offline_unconfigured';
 }
 
@@ -60,8 +68,9 @@ export const fetchLeaderboard = async (limit: number = 10): Promise<LeaderboardR
       success: true,
       entries: [],
       totalCount: 0,
+      connectionState: 'unconfigured',
       mode: 'offline_unconfigured',
-      errorMessage: 'Koneksi Supabase belum dikonfigurasi di environment. Berjalan dalam mode lokal.',
+      errorMessage: configStatus.message || 'Koneksi Supabase belum dikonfigurasi di environment. Berjalan dalam mode lokal.',
     };
   }
 
@@ -71,6 +80,7 @@ export const fetchLeaderboard = async (limit: number = 10): Promise<LeaderboardR
       success: false,
       entries: [],
       totalCount: 0,
+      connectionState: 'unconfigured',
       mode: 'offline_unconfigured',
       errorMessage: 'Inisialisasi klien Supabase tidak dapat dilakukan.',
     };
@@ -93,12 +103,20 @@ export const fetchLeaderboard = async (limit: number = 10): Promise<LeaderboardR
 
     if (error) {
       console.warn('[LeaderboardService] Query error:', error.message);
+      const isPermission =
+        error.message.toLowerCase().includes('permission') ||
+        error.message.toLowerCase().includes('policy') ||
+        error.code === '42501';
+
       return {
         success: false,
         entries: [],
         totalCount: 0,
+        connectionState: isPermission ? 'permission_error' : 'connection_error',
         mode: 'online',
-        errorMessage: `Gagal membaca leaderboard: ${error.message}`,
+        errorMessage: isPermission
+          ? `Izin akses ditolak (RLS / Permission issue): ${error.message}`
+          : `Gagal membaca leaderboard dari Supabase: ${error.message}`,
       };
     }
 
@@ -107,6 +125,7 @@ export const fetchLeaderboard = async (limit: number = 10): Promise<LeaderboardR
         success: true,
         entries: [],
         totalCount: count ?? 0,
+        connectionState: 'connected',
         mode: 'online',
       };
     }
@@ -119,6 +138,7 @@ export const fetchLeaderboard = async (limit: number = 10): Promise<LeaderboardR
       success: true,
       entries,
       totalCount: count ?? entries.length,
+      connectionState: 'connected',
       mode: 'online',
     };
   } catch (err: unknown) {
@@ -128,8 +148,9 @@ export const fetchLeaderboard = async (limit: number = 10): Promise<LeaderboardR
       success: false,
       entries: [],
       totalCount: 0,
+      connectionState: 'connection_error',
       mode: 'online',
-      errorMessage: errorMsg,
+      errorMessage: `Gagal menghubungi server Supabase: ${errorMsg}`,
     };
   }
 };
