@@ -243,12 +243,22 @@ export const submitMatchResult = async (
       // 5. Penanganan HTTP 5xx Server Error
       if (statusCode >= 500) {
         console.warn(`[scoreSubmissionService] HTTP ${statusCode}: Kesalahan server cloud:`, responseBody);
+        const isSchemaMismatch =
+          responseBody?.error === 'DATABASE_SCHEMA_TYPE_MISMATCH' ||
+          String(responseBody?.message || '').includes('22P02') ||
+          String(responseBody?.details || '').includes('22P02') ||
+          String(responseBody?.details || '').toLowerCase().includes('uuid') ||
+          String(error.message || '').includes('22P02');
+
         return {
           status: 'failed',
           success: false,
           matchId: payload.match_id,
-          message: `Server leaderboard sedang mengalami gangguan (HTTP ${statusCode}). Skor tersimpan aman di profil lokal.`,
-          error: `HTTP_${statusCode}_SERVER_ERROR`,
+          message: isSchemaMismatch
+            ? 'Kolom database match_id masih bertipe UUID (22P02). Perlu migrasi SQL 002 di Supabase SQL Editor.'
+            : responseBody?.message ||
+              `Server leaderboard sedang mengalami gangguan (HTTP ${statusCode}). Skor tersimpan aman di profil lokal.`,
+          error: isSchemaMismatch ? 'DATABASE_SCHEMA_TYPE_MISMATCH' : `HTTP_${statusCode}_SERVER_ERROR`,
           details: responseBody || error,
         };
       }

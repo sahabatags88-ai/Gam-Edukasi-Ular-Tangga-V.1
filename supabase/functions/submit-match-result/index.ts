@@ -226,11 +226,19 @@ Deno.serve(async (req: Request) => {
 
     if (checkError) {
       console.error('[submit-match-result] Error saat memeriksa match_id:', checkError);
+      const isUuidMismatch =
+        checkError.code === '22P02' ||
+        checkError.message?.toLowerCase().includes('uuid');
+
       return jsonResponse(
         {
           success: false,
-          error: 'DATABASE_QUERY_ERROR',
-          message: 'Gagal memverifikasi catatan pertandingan pada database.',
+          error: isUuidMismatch ? 'DATABASE_SCHEMA_TYPE_MISMATCH' : 'DATABASE_QUERY_ERROR',
+          message: isUuidMismatch
+            ? 'Kolom match_id pada tabel database match_results masih bertipe UUID (Error 22P02). Format game adalah teks (aq-...). Jalankan migrasi SQL 002_alter_match_id_to_text.sql di Supabase SQL Editor.'
+            : 'Gagal memverifikasi catatan pertandingan pada database.',
+          details: checkError.message,
+          code: checkError.code,
         },
         500
       );
@@ -286,12 +294,19 @@ Deno.serve(async (req: Request) => {
       }
 
       console.error('[submit-match-result] Gagal insert ke match_results:', insertError);
+      const isUuidMismatch =
+        insertError.code === '22P02' ||
+        insertError.message?.toLowerCase().includes('uuid');
+
       return jsonResponse(
         {
           success: false,
-          error: 'INSERT_FAILED',
-          message: 'Gagal menyimpan skor pertandingan ke leaderboard.',
+          error: isUuidMismatch ? 'DATABASE_SCHEMA_TYPE_MISMATCH' : 'INSERT_FAILED',
+          message: isUuidMismatch
+            ? 'Kolom match_id pada tabel database match_results masih bertipe UUID (Error 22P02). Jalankan migrasi SQL 002_alter_match_id_to_text.sql di Supabase SQL Editor.'
+            : 'Gagal menyimpan skor pertandingan ke leaderboard.',
           details: insertError.message,
+          code: insertError.code,
         },
         500
       );
