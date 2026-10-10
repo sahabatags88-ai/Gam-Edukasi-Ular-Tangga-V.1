@@ -21,6 +21,8 @@ const supabaseKey = (
   ''
 ).trim();
 
+export const getSupabaseUrl = (): string => supabaseUrl;
+
 export type SupabaseConfigDetail =
   | 'not_configured'
   | 'missing_url'

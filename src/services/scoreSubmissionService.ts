@@ -1,4 +1,4 @@
-import { getSupabase, getSupabaseConfigStatus } from '../lib/supabase';
+import { getSupabase, getSupabaseConfigStatus, getSupabaseUrl } from '../lib/supabase';
 import { getPerformanceGrade } from '../utils/scoreEngine';
 import { GameStats } from '../types/game';
 
@@ -103,29 +103,84 @@ export const submitMatchResult = async (
   }
 
   try {
-    // Panggil Edge Function submit-match-result
+    // Panggil Edge Function submit-match-result melalui supabase.functions.invoke
     const { data, error } = await supabase.functions.invoke('submit-match-result', {
       body: payload,
     });
 
     if (error) {
-      // Periksa status code dan response body dari FunctionsHttpError
       let statusCode = 0;
       let responseBody: any = null;
 
+      // Cek apakah error membawa objek Response (FunctionsHttpError)
       if (error && 'context' in (error as any) && (error as any).context) {
         try {
           const ctx = (error as any).context;
-          statusCode = typeof ctx.status === 'number' ? ctx.status : 0;
-          if (typeof ctx.json === 'function') {
-            responseBody = await ctx.json();
+          if (typeof ctx?.status === 'number') {
+            statusCode = ctx.status;
+          }
+          if (typeof ctx?.json === 'function') {
+            responseBody = await (ctx.clone?.().json?.() ?? ctx.json());
           }
         } catch (_ctxErr) {
-          // Response body might be empty or already consumed
+          // Response stream might be consumed or unparseable
         }
       }
 
-      // 1. Tangani 409 Conflict / Duplikasi Pertandingan
+      // Jika statusCode belum diketahui (misal FunctionsFetchError akibat browser CORS preflight menolak 404)
+      if (statusCode === 0) {
+        // A. Cek status offline browser
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          console.warn('[scoreSubmissionService] Perangkat sedang offline (navigator.onLine === false).');
+          return {
+            status: 'failed',
+            success: false,
+            matchId: payload.match_id,
+            message: 'Perangkat sedang offline (tidak ada koneksi internet). Skor tersimpan aman di profil lokal.',
+            error: 'NETWORK_OFFLINE',
+          };
+        }
+
+        // B. Lakukan probe GET sederhana ke endpoint functions tanpa custom headers
+        // untuk mendeteksi apakah gateway Supabase merespons dengan HTTP 404 (NOT_FOUND)
+        const baseUrl = getSupabaseUrl();
+        if (baseUrl) {
+          try {
+            const probeRes = await fetch(`${baseUrl}/functions/v1/submit-match-result`, {
+              method: 'GET',
+            });
+            statusCode = probeRes.status;
+            const sbErrorCode = probeRes.headers.get('sb-error-code');
+            try {
+              responseBody = await probeRes.json();
+            } catch {
+              // ignore body json
+            }
+
+            if (statusCode === 404 && (sbErrorCode === 'NOT_FOUND' || responseBody?.code === 'NOT_FOUND')) {
+              console.warn(
+                '[scoreSubmissionService] Diagnosis: Edge Function submit-match-result belum di-deploy ke Supabase (HTTP 404 / NOT_FOUND).'
+              );
+              return {
+                status: 'failed',
+                success: false,
+                matchId: payload.match_id,
+                message:
+                  'Layanan skor online belum aktif di cloud (Fungsi submit-match-result belum di-deploy / HTTP 404). Skor tersimpan aman di profil lokal.',
+                error: 'HTTP_404_FUNCTION_NOT_DEPLOYED',
+                details: { statusCode, sbErrorCode, responseBody },
+              };
+            }
+          } catch (probeErr) {
+            console.warn(
+              '[scoreSubmissionService] Probe endpoint gagal:',
+              probeErr instanceof Error ? probeErr.message : String(probeErr)
+            );
+          }
+        }
+      }
+
+      // 1. Penanganan HTTP 409 Conflict / Duplikasi Pertandingan (Idempotensi)
       const isDuplicate =
         statusCode === 409 ||
         responseBody?.error === 'MATCH_ALREADY_RECORDED' ||
@@ -137,36 +192,80 @@ export const submitMatchResult = async (
           status: 'duplicate_ignored',
           success: true, // Idempotent sukses, skor sudah ada di leaderboard
           matchId: payload.match_id,
-          message: 'Skor pertandingan ini telah tercatat di leaderboard.',
+          message: 'Skor pertandingan ini telah tercatat di Leaderboard Online.',
           details: responseBody || error,
         };
       }
 
-      // 2. Tangani 404 Not Found (Fungsi belum di-deploy ke Supabase)
+      // 2. Penanganan HTTP 404 Not Found (Fungsi belum di-deploy)
       if (statusCode === 404 || responseBody?.code === 'NOT_FOUND') {
+        console.warn('[scoreSubmissionService] HTTP 404: Edge Function submit-match-result tidak ditemukan / belum di-deploy.');
         return {
           status: 'failed',
           success: false,
           matchId: payload.match_id,
-          message: 'Layanan skor online belum aktif di cloud (HTTP 404). Skor tersimpan aman secara lokal.',
-          error: 'EDGE_FUNCTION_NOT_DEPLOYED',
+          message:
+            'Layanan skor online belum aktif di cloud (Fungsi submit-match-result belum di-deploy / HTTP 404). Skor tersimpan aman di profil lokal.',
+          error: 'HTTP_404_FUNCTION_NOT_DEPLOYED',
           details: responseBody || error,
         };
       }
 
-      // 3. Tangani error lainnya dari backend
-      const fallbackMsg = responseBody?.message || error.message || 'Gagal menghubungi server Edge Function';
+      // 3. Penanganan HTTP 401 / 403 (Autentikasi atau Izin Ditolak)
+      if (statusCode === 401 || statusCode === 403) {
+        console.warn(`[scoreSubmissionService] HTTP ${statusCode}: Izin akses ke Edge Function ditolak.`);
+        return {
+          status: 'failed',
+          success: false,
+          matchId: payload.match_id,
+          message: `Akses ke server leaderboard ditolak (Autentikasi / HTTP ${statusCode}). Skor tersimpan aman di profil lokal.`,
+          error: `HTTP_${statusCode}_UNAUTHORIZED_OR_FORBIDDEN`,
+          details: responseBody || error,
+        };
+      }
+
+      // 4. Penanganan HTTP 400 Bad Request (Validasi Payload Gagal)
+      if (statusCode === 400) {
+        const validationMsg = Array.isArray(responseBody?.errors)
+          ? responseBody.errors.join('; ')
+          : responseBody?.message || 'Data hasil pertandingan tidak memenuhi validasi server';
+        console.warn('[scoreSubmissionService] HTTP 400: Validasi payload gagal:', responseBody);
+        return {
+          status: 'failed',
+          success: false,
+          matchId: payload.match_id,
+          message: `Format data pertandingan tidak valid (HTTP 400): ${validationMsg}. Skor tersimpan aman di profil lokal.`,
+          error: 'HTTP_400_BAD_REQUEST',
+          details: responseBody || error,
+        };
+      }
+
+      // 5. Penanganan HTTP 5xx Server Error
+      if (statusCode >= 500) {
+        console.warn(`[scoreSubmissionService] HTTP ${statusCode}: Kesalahan server cloud:`, responseBody);
+        return {
+          status: 'failed',
+          success: false,
+          matchId: payload.match_id,
+          message: `Server leaderboard sedang mengalami gangguan (HTTP ${statusCode}). Skor tersimpan aman di profil lokal.`,
+          error: `HTTP_${statusCode}_SERVER_ERROR`,
+          details: responseBody || error,
+        };
+      }
+
+      // 6. Penanganan Gangguan Jaringan / CORS / Relay Error
+      console.warn('[scoreSubmissionService] Network / Relay error:', error.message || error);
       return {
         status: 'failed',
         success: false,
         matchId: payload.match_id,
-        message: fallbackMsg,
-        error: responseBody?.error || error.message,
+        message: 'Gangguan koneksi jaringan atau CORS ke server leaderboard. Skor tersimpan aman di profil lokal.',
+        error: error.name || 'NETWORK_CONNECTION_ERROR',
         details: responseBody || error,
       };
     }
 
-    // Periksa payload balasan sukses dari function
+    // Periksa payload balasan sukses dari function (2xx)
     if (data && data.success === false) {
       if (data.error === 'MATCH_ALREADY_RECORDED') {
         return {
@@ -197,13 +296,13 @@ export const submitMatchResult = async (
     };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.warn('[scoreSubmissionService] Error submitMatchResult:', errorMsg);
+    console.warn('[scoreSubmissionService] Exception submitMatchResult:', errorMsg);
 
     return {
       status: 'failed',
       success: false,
       matchId: payload.match_id,
-      message: 'Koneksi jaringan gagal. Skor tetap aman tersimpan di profil lokal.',
+      message: 'Koneksi jaringan gagal terhubung ke server. Skor tetap aman tersimpan di profil lokal.',
       error: errorMsg,
     };
   }

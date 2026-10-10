@@ -204,7 +204,7 @@ export const FinishScreen: React.FC<FinishScreenProps> = ({
                       audio.buttonClick();
                       onRetrySubmission();
                     }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white font-bold border border-rose-500/40 transition-colors cursor-pointer text-xs"
+                    className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white font-bold border border-rose-500/40 transition-colors cursor-pointer text-xs"
                   >
                     <RefreshCw className="w-3 h-3" />
                     <span>Coba Lagi</span>
